@@ -47,11 +47,7 @@ class FaissRetriever:
 
     def _embeddings_client(self):
         if self._embeddings is None:
-            from langchain_openai import OpenAIEmbeddings
-
-            self._embeddings = OpenAIEmbeddings(
-                model=self._settings.embedding_model, api_key=self._settings.openai_api_key
-            )
+            self._embeddings = get_embeddings_client(self._settings)
         return self._embeddings
 
     def search(self, query: str, top_k: int | None = None) -> list[RetrievedChunk]:

@@ -12,10 +12,12 @@ from __future__ import annotations
 
 from langchain.agents import create_agent
 
+from agent.backends import has_openai_key
 from agent.config import Settings, get_settings
-from agent.tools.doc_lookup import doc_lookup_tool
-from agent.tools.issue_clustering import issue_clustering_tool
-from agent.tools.pr_triage import pr_triage_tool
+from agent.offline import route_offline
+from agent.tools.doc_lookup import doc_lookup, doc_lookup_tool
+from agent.tools.issue_clustering import issue_clustering, issue_clustering_tool
+from agent.tools.pr_triage import pr_triage, pr_triage_tool
 
 # Weak first-pass prompt: terse tool descriptions only, no routing guidance.
 # Kept so `sift eval --baseline` can reproduce the "before" reliability number.
@@ -64,15 +66,24 @@ def build_agent(settings: Settings | None = None, prompt_version: str = "tuned")
     return create_agent(model=model, tools=TOOLS, system_prompt=system_prompt)
 
 
-def run_agent(question: str, settings: Settings | None = None, prompt_version: str = "tuned") -> dict:
+def run_agent(
+    question: str,
+    settings: Settings | None = None,
+    prompt_version: str = "tuned",
+    repo: str | None = None,
+) -> dict:
     """One-shot query through the agent.
 
     Returns the final answer text plus the ordered list of tool names
-    invoked, which the eval harness uses to score routing correctness.
+    invoked, which the eval harness uses to score routing correctness. With
+    no `OPENAI_API_KEY` configured, falls back to `_run_offline` since the
+    LangGraph tool-calling loop has no offline stand-in.
     """
     settings = settings or get_settings()
-    graph = build_agent(settings, prompt_version=prompt_version)
+    if not has_openai_key(settings):
+        return _run_offline(question, settings, repo=repo)
 
+    graph = build_agent(settings, prompt_version=prompt_version)
     result = graph.invoke(
         {"messages": [{"role": "user", "content": question}]},
         config={"recursion_limit": settings.max_agent_iterations * 2},
@@ -81,3 +92,48 @@ def run_agent(question: str, settings: Settings | None = None, prompt_version: s
     messages = result["messages"]
     tool_calls = [m.name for m in messages if getattr(m, "type", None) == "tool"]
     return {"answer": messages[-1].content, "tool_calls": tool_calls, "messages": messages}
+
+
+def _run_offline(question: str, settings: Settings, repo: str | None) -> dict:
+    """Rule-based single-tool dispatch used when no `OPENAI_API_KEY` is set.
+
+    There's no offline stand-in for the LangGraph tool-calling loop itself,
+    so this routes to at most one tool by keyword match (`agent.offline.route_offline`)
+    rather than reasoning about the question. Multi-step questions that
+    genuinely need more than one tool are out of scope for this fallback.
+    """
+    tool_name = route_offline(question)
+    if tool_name is None:
+        return {
+            "answer": (
+                "This question doesn't clearly match doc_lookup, pr_triage, or "
+                "issue_clustering, and there's no general-purpose reasoning available "
+                "without OPENAI_API_KEY configured. Not grounded in the repository."
+            ),
+            "tool_calls": [],
+        }
+
+    if tool_name == "doc_lookup":
+        result = doc_lookup(question, settings=settings)
+        return {"answer": result.answer, "tool_calls": ["doc_lookup"], "result": result}
+
+    if repo is None:
+        return {
+            "answer": f"This looks like a {tool_name} question, but no repo (owner/repo) was specified.",
+            "tool_calls": [tool_name],
+        }
+
+    if tool_name == "pr_triage":
+        result = pr_triage(repo, settings=settings)
+        return {
+            "answer": f"Triaged {len(result.triaged)} open PR(s) for {repo}.",
+            "tool_calls": ["pr_triage"],
+            "result": result,
+        }
+
+    result = issue_clustering(repo, settings=settings)
+    return {
+        "answer": f"Found {len(result.clusters)} issue cluster(s) for {repo}.",
+        "tool_calls": ["issue_clustering"],
+        "result": result,
+    }
