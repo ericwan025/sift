@@ -1,0 +1,19 @@
+[project]
+name = "sift"
+version = "0.1.0"
+description = "LangChain-powered CLI agent for PR triage, issue clustering, and RAG doc lookup over a GitHub repo."
+requires-python = ">=3.11"
+
+[project.scripts]
+sift = "agent.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
