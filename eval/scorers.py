@@ -85,6 +85,16 @@ def score_pr_triage(task: dict, actual: PRTriageResult) -> ScoreResult:
 
 def score_issue_clustering(task: dict, actual: IssueClusteringResult) -> ScoreResult:
     expected = task["expected"]
+
+    if "singleton" in expected:
+        number = expected["singleton"]
+        cluster = next((c for c in actual.clusters if number in c.issue_numbers), None)
+        if cluster is None:
+            return ScoreResult(False, f"issue #{number} not present in any cluster")
+        if cluster.size != 1:
+            return ScoreResult(False, f"expected issue #{number} to be a singleton, got cluster size {cluster.size}")
+        return ScoreResult(True, "ok")
+
     issue_numbers = expected["same_cluster"]
 
     owning_clusters = []
