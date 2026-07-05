@@ -120,18 +120,33 @@ def extractive_doc_answer(chunks) -> tuple[str, bool]:
     return best.chunk_text.strip(), True
 
 
-_ROUTING_KEYWORDS = {
+_ROUTING_KEYWORDS_BASELINE = {
+    # Deliberately sparse -- stands in for a first-pass, un-iterated prompt so
+    # the eval harness's --baseline/--current comparison has a real (if
+    # offline-simulated) delta to measure without needing live LLM credits.
+    "pr_triage": ("pull request",),
+    "issue_clustering": ("cluster",),
+    "doc_lookup": (),
+}
+
+_ROUTING_KEYWORDS_TUNED = {
     "pr_triage": ("pull request", " pr ", "pr#", "review backlog", "hotfix", "merge"),
     "issue_clustering": ("issue", "duplicate", "cluster", "theme", "backlog"),
     "doc_lookup": ("how does", "where is", "why does", "how is", "explain"),
 }
 
 
-def route_offline(question: str) -> str | None:
+def route_offline(question: str, prompt_version: str = "tuned") -> str | None:
     """Keyword-based tool routing used when no LLM is configured. Returns a
-    tool name or `None` if nothing matches (conversational fallback)."""
+    tool name or `None` if nothing matches (conversational fallback).
+
+    `prompt_version` selects between a deliberately sparse baseline table and
+    the fuller tuned table, mirroring the online agent's baseline/tuned
+    system prompts -- see `agent.agent`.
+    """
+    table = _ROUTING_KEYWORDS_TUNED if prompt_version == "tuned" else _ROUTING_KEYWORDS_BASELINE
     lowered = f" {question.lower()} "
-    for tool_name, keywords in _ROUTING_KEYWORDS.items():
+    for tool_name, keywords in table.items():
         if any(keyword in lowered for keyword in keywords):
             return tool_name
     return None

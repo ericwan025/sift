@@ -81,7 +81,7 @@ def run_agent(
     """
     settings = settings or get_settings()
     if not has_openai_key(settings):
-        return _run_offline(question, settings, repo=repo)
+        return _run_offline(question, settings, repo=repo, prompt_version=prompt_version)
 
     graph = build_agent(settings, prompt_version=prompt_version)
     result = graph.invoke(
@@ -94,7 +94,7 @@ def run_agent(
     return {"answer": messages[-1].content, "tool_calls": tool_calls, "messages": messages}
 
 
-def _run_offline(question: str, settings: Settings, repo: str | None) -> dict:
+def _run_offline(question: str, settings: Settings, repo: str | None, prompt_version: str = "tuned") -> dict:
     """Rule-based single-tool dispatch used when no `OPENAI_API_KEY` is set.
 
     There's no offline stand-in for the LangGraph tool-calling loop itself,
@@ -102,7 +102,7 @@ def _run_offline(question: str, settings: Settings, repo: str | None) -> dict:
     rather than reasoning about the question. Multi-step questions that
     genuinely need more than one tool are out of scope for this fallback.
     """
-    tool_name = route_offline(question)
+    tool_name = route_offline(question, prompt_version=prompt_version)
     if tool_name is None:
         return {
             "answer": (
