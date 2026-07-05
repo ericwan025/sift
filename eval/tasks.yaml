@@ -1,0 +1,393 @@
+# Eval suite: 50 tasks across doc_lookup, pr_triage, issue_clustering, and
+# agent routing/multi-step.
+#
+# doc_lookup/routing/multi_step tasks run through `agent.agent.run_agent()`
+# (so routing is exercised, not just the tool). pr_triage/issue_clustering
+# tasks call the tool directly against the fixtures in `eval/fixtures.py`.
+#
+# `requires_live_llm: true` marks tasks the offline hashing-embedding /
+# keyword-routing fallback cannot meaningfully attempt (judging that no
+# answer exists in the corpus, or calling two tools in one turn) -- these
+# are reported as SKIPPED rather than scored when no OPENAI_API_KEY is
+# configured. See README's Evaluation section.
+
+# ---------------------------------------------------------------------------
+# doc_lookup (20): self-referential -- these ask the agent about its own
+# source code, indexed via `sift index .` from the repo root.
+# ---------------------------------------------------------------------------
+- id: doc_001
+  type: doc_lookup
+  query: "Where is the FAISS index loaded at runtime?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "loader.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_002
+  type: doc_lookup
+  query: "How does the chunk_file function decide where to split a file?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "chunker.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_003
+  type: doc_lookup
+  query: "Where is the OpenAI embeddings client constructed?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "backends.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_004
+  type: doc_lookup
+  query: "What environment variable controls the number of retrieved chunks?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "config.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_005
+  type: doc_lookup
+  query: "Where is the GitHub CODEOWNERS file parsed?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "pr_triage.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_006
+  type: doc_lookup
+  query: "What clustering algorithm is used to group issues?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "issue_clustering.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_007
+  type: doc_lookup
+  query: "Where is the PR classification cache saved to disk?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "pr_triage.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_008
+  type: doc_lookup
+  query: "What CLI command builds the FAISS index?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "cli.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_009
+  type: doc_lookup
+  query: "How does the agent decide the max number of iterations?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "agent.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_010
+  type: doc_lookup
+  query: "What happens when doc_lookup cannot find an answer in the codebase?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "doc_lookup.py"
+    must_be_grounded: true
+  difficulty: easy
+
+- id: doc_011
+  type: doc_lookup
+  query: "How does the app decide whether to use a real LLM or not?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "backends.py"
+    must_be_grounded: true
+  difficulty: ambiguous
+
+- id: doc_012
+  type: doc_lookup
+  query: "What happens if OPENAI_API_KEY is not set?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "offline.py"
+    must_be_grounded: true
+  difficulty: ambiguous
+
+- id: doc_013
+  type: doc_lookup
+  query: "How does the chunker avoid splitting a file in the middle of a line?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "chunker.py"
+    must_be_grounded: true
+  difficulty: ambiguous
+
+- id: doc_014
+  type: doc_lookup
+  query: "How does the tool decide which reviewers to suggest on a PR?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "pr_triage.py"
+    must_be_grounded: true
+  difficulty: ambiguous
+
+- id: doc_015
+  type: doc_lookup
+  query: "How is the fetch limit enforced when listing open PRs?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "github_client.py"
+    must_be_grounded: true
+  difficulty: ambiguous
+
+- id: doc_016
+  type: doc_lookup
+  query: "What's used to pick a theme label for a group of issues?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "issue_clustering.py"
+    must_be_grounded: true
+  difficulty: ambiguous
+
+- id: doc_017
+  type: doc_lookup
+  query: "How does retrieval scoring work under the hood?"
+  expected:
+    must_route_to: doc_lookup
+    must_cite_file: "loader.py"
+    must_be_grounded: true
+  difficulty: ambiguous
+
+- id: doc_018
+  type: doc_lookup
+  query: "How does Sift send Slack notifications when a PR is triaged?"
+  expected:
+    must_route_to: doc_lookup
+    must_be_grounded: false
+  difficulty: ambiguous
+  requires_live_llm: true
+
+- id: doc_019
+  type: doc_lookup
+  query: "Where is user account data stored in a database?"
+  expected:
+    must_route_to: doc_lookup
+    must_be_grounded: false
+  difficulty: ambiguous
+  requires_live_llm: true
+
+- id: doc_020
+  type: doc_lookup
+  query: "How does Sift process credit card payments?"
+  expected:
+    must_route_to: doc_lookup
+    must_be_grounded: false
+  difficulty: ambiguous
+  requires_live_llm: true
+
+# ---------------------------------------------------------------------------
+# pr_triage (10): against the fixture PRs in eval/fixtures.py (FIXTURE_PRS,
+# numbered 101-110), not the real GitHub API.
+# ---------------------------------------------------------------------------
+- id: pr_001
+  type: pr_triage
+  query: "Triage PR #101"
+  expected: {pr_number: 101, category: bug-fix, priority: high}
+  difficulty: easy
+
+- id: pr_002
+  type: pr_triage
+  query: "Triage PR #102"
+  expected: {pr_number: 102, category: feature, priority: medium}
+  difficulty: easy
+
+- id: pr_003
+  type: pr_triage
+  query: "Triage PR #103"
+  expected: {pr_number: 103, category: refactor, priority: low}
+  difficulty: easy
+
+- id: pr_004
+  type: pr_triage
+  query: "Triage PR #104"
+  expected: {pr_number: 104, category: docs, priority: low}
+  difficulty: easy
+
+- id: pr_005
+  type: pr_triage
+  query: "Triage PR #105"
+  expected: {pr_number: 105, category: test, priority: low}
+  difficulty: easy
+
+- id: pr_006
+  type: pr_triage
+  query: "Triage PR #106"
+  expected: {pr_number: 106, category: chore, priority: low}
+  difficulty: easy
+
+- id: pr_007
+  type: pr_triage
+  query: "Triage PR #107"
+  expected: {pr_number: 107, category: dependency, priority: low}
+  difficulty: easy
+
+- id: pr_008
+  type: pr_triage
+  query: "Triage PR #108"
+  expected: {pr_number: 108, category: bug-fix, priority: high}
+  difficulty: ambiguous
+
+- id: pr_009
+  type: pr_triage
+  query: "Triage PR #109"
+  expected: {pr_number: 109, category: bug-fix, priority: low}
+  difficulty: ambiguous
+
+- id: pr_010
+  type: pr_triage
+  query: "Triage PR #110"
+  expected: {pr_number: 110, category: feature, priority: high}
+  difficulty: ambiguous
+
+# ---------------------------------------------------------------------------
+# issue_clustering (10): against the fixture issues in eval/fixtures.py
+# (FIXTURE_ISSUES, numbered 201-209) -- three login/session bugs, three
+# setup-docs requests, two dashboard-performance reports, one unrelated
+# feature request.
+# ---------------------------------------------------------------------------
+- id: ic_001
+  type: issue_clustering
+  query: "Are #201 and #202 duplicates?"
+  expected: {same_cluster: [201, 202]}
+  difficulty: easy
+
+- id: ic_002
+  type: issue_clustering
+  query: "Are #201 and #203 duplicates?"
+  expected: {same_cluster: [201, 203]}
+  difficulty: easy
+
+- id: ic_003
+  type: issue_clustering
+  query: "Are #202 and #203 duplicates?"
+  expected: {same_cluster: [202, 203]}
+  difficulty: easy
+
+- id: ic_004
+  type: issue_clustering
+  query: "Do #201, #202, and #203 all land in the same cluster?"
+  expected: {same_cluster: [201, 202, 203]}
+  difficulty: easy
+
+- id: ic_005
+  type: issue_clustering
+  query: "Are #204 and #205 duplicates?"
+  expected: {same_cluster: [204, 205]}
+  difficulty: easy
+
+- id: ic_006
+  type: issue_clustering
+  query: "Are #204 and #206 duplicates?"
+  expected: {same_cluster: [204, 206]}
+  difficulty: ambiguous
+
+- id: ic_007
+  type: issue_clustering
+  query: "Are #205 and #206 duplicates?"
+  expected: {same_cluster: [205, 206]}
+  difficulty: ambiguous
+
+- id: ic_008
+  type: issue_clustering
+  query: "Do #204, #205, and #206 all land in the same cluster?"
+  expected: {same_cluster: [204, 205, 206]}
+  difficulty: easy
+
+- id: ic_009
+  type: issue_clustering
+  query: "Are #207 and #208 duplicates?"
+  expected: {same_cluster: [207, 208]}
+  difficulty: easy
+
+- id: ic_010
+  type: issue_clustering
+  query: "Is #209 unrelated to every other open issue?"
+  expected: {singleton: 209}
+  difficulty: ambiguous
+
+# ---------------------------------------------------------------------------
+# routing / multi_step (10): tests whether the agent (or, offline, the
+# keyword router) picks the right tool -- and, for the last two, whether it
+# can chain two tools in one turn.
+# ---------------------------------------------------------------------------
+- id: rt_001
+  type: routing
+  query: "How does the retry/backoff logic work in this codebase?"
+  expected: {must_route_to: doc_lookup}
+  difficulty: easy
+
+- id: rt_002
+  type: routing
+  query: "What is the status of open pull requests right now?"
+  expected: {must_route_to: pr_triage}
+  difficulty: easy
+
+- id: rt_003
+  type: routing
+  query: "Can you group the open issues into themes?"
+  expected: {must_route_to: issue_clustering}
+  difficulty: easy
+
+- id: rt_004
+  type: routing
+  query: "What's your favorite programming language?"
+  expected: {must_route_to: null}
+  difficulty: ambiguous
+
+- id: rt_005
+  type: routing
+  query: "Where is CODEOWNERS parsed for reviewer suggestions?"
+  expected: {must_route_to: doc_lookup}
+  difficulty: easy
+
+- id: rt_006
+  type: routing
+  query: "Summarize the pull request backlog by priority"
+  expected: {must_route_to: pr_triage}
+  difficulty: easy
+
+- id: rt_007
+  type: routing
+  query: "Are there duplicate issues in the backlog?"
+  expected: {must_route_to: issue_clustering}
+  difficulty: easy
+
+- id: rt_008
+  type: routing
+  query: "What is 2+2?"
+  expected: {must_route_to: null}
+  difficulty: ambiguous
+
+- id: rt_009
+  type: multi_step
+  query: "Summarize open PRs and also explain how the retry/backoff logic works"
+  expected: {must_call_tools: [pr_triage, doc_lookup]}
+  difficulty: multi_step
+  requires_live_llm: true
+
+- id: rt_010
+  type: multi_step
+  query: "Cluster the open issues and tell me how the FAISS index is loaded"
+  expected: {must_call_tools: [issue_clustering, doc_lookup]}
+  difficulty: multi_step
+  requires_live_llm: true

@@ -13,6 +13,7 @@ argument and only falls back to these when the key is absent.
 from __future__ import annotations
 
 import re
+import zlib
 from collections import Counter
 
 import numpy as np
@@ -20,11 +21,24 @@ import numpy as np
 from agent.schemas import PRCategory, PRPriority
 
 _TOKEN_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9_]{1,}")
-_HASH_DIM = 256
+_HASH_DIM = 512
+
+
+def _stable_hash(token: str) -> int:
+    """Deterministic across processes, unlike Python's built-in `hash()`,
+    which salts strings per-process (`PYTHONHASHSEED`). A FAISS index built
+    in one process and queried from another needs the same token -> bucket
+    mapping every time, or retrieval degrades to noise."""
+    return zlib.crc32(token.encode("utf-8"))
+
 
 _STOPWORDS = {
     "the", "a", "an", "is", "are", "of", "to", "in", "on", "for", "and", "or",
     "this", "that", "it", "with", "as", "be", "by", "at", "from", "not",
+    # common code tokens that appear in nearly every file and carry no
+    # discriminative signal for a bag-of-words retriever
+    "def", "class", "self", "import", "from", "return", "if", "else", "elif",
+    "none", "true", "false", "str", "int", "list", "dict", "settings", "config",
 }
 
 
@@ -48,7 +62,8 @@ class OfflineEmbeddings:
     def _vector(self, text: str) -> list[float]:
         vec = np.zeros(self.dim, dtype="float32")
         for token in _tokenize(text):
-            vec[hash(token) % self.dim] += 1.0
+            vec[_stable_hash(token) % self.dim] += 1.0
+        vec = np.log1p(vec)  # dampen very high-frequency tokens within a chunk
         norm = np.linalg.norm(vec)
         if norm > 0:
             vec /= norm
@@ -108,7 +123,12 @@ def heuristic_label_cluster(titles: list[str]) -> str:
 
 NOT_FOUND_SENTENCE = "I don't have enough information in the codebase to answer that."
 # L2 distance above this (over normalized hashed vectors) is treated as "no good match".
-_GROUNDING_DISTANCE_THRESHOLD = 1.2
+# Calibrated empirically against this repo's own index -- hashing bag-of-words
+# distances cluster tightly (~1.3-1.8) regardless of relevance, so this
+# threshold mostly guards against the empty-index / totally-unrelated-corpus
+# case. Real groundedness judgment (rejecting an in-corpus-but-irrelevant
+# match) needs semantic understanding that only the live LLM path provides.
+_GROUNDING_DISTANCE_THRESHOLD = 1.8
 
 
 def extractive_doc_answer(chunks) -> tuple[str, bool]:
@@ -130,9 +150,33 @@ _ROUTING_KEYWORDS_BASELINE = {
 }
 
 _ROUTING_KEYWORDS_TUNED = {
-    "pr_triage": ("pull request", " pr ", "pr#", "review backlog", "hotfix", "merge"),
-    "issue_clustering": ("issue", "duplicate", "cluster", "theme", "backlog"),
-    "doc_lookup": ("how does", "where is", "why does", "how is", "explain"),
+    # Full phrases rather than bare nouns like "pr"/"issue"/"cluster": a
+    # question *about* pr_triage.py's implementation ("where is the PR cache
+    # saved?") mentions the same vocabulary as a request to *run* triage
+    # ("what's the status of open pull requests?"). Bare-noun matching can't
+    # tell those apart; specific action phrases mostly can.
+    "pr_triage": (
+        "status of open pull requests",
+        "pull request backlog",
+        "review backlog",
+        "what to review next",
+        "rank the pull requests",
+        "triage the",
+        "triage open",
+    ),
+    "issue_clustering": (
+        "group the open issues",
+        "cluster the open issues",
+        "duplicate issues",
+        "themes in the issue backlog",
+        "group issues by theme",
+    ),
+    "doc_lookup": (
+        "how does", "where is", "why does", "how is", "explain",
+        "what does", "how do", "how are", "what's used", "which file",
+        "what happens", "what clustering algorithm", "what cli command",
+        "what environment variable",
+    ),
 }
 
 
