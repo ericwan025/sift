@@ -4,6 +4,7 @@ __pycache__/
 venv/
 .env
 .index/
+.cache/
 *.egg-info/
 .pytest_cache/
 eval/results/
