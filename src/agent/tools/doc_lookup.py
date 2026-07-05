@@ -73,4 +73,7 @@ def doc_lookup_tool(question: str) -> str:
     codebase. Use for any "how does X work" / "where is Y" style question.
     Returns a grounded answer with file:line citations, or reports that no
     answer was found in the codebase rather than guessing."""
-    return doc_lookup(question).model_dump_json()
+    try:
+        return doc_lookup(question).model_dump_json()
+    except Exception as exc:  # noqa: BLE001 -- surfaced to the agent as a clean tool error
+        return DocLookupResult(answer=f"doc_lookup failed: {exc}", sources=[], grounded=False).model_dump_json()
