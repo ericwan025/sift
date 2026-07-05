@@ -10,11 +10,12 @@ import json
 from pathlib import Path
 
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
+from agent.backends import get_chat_model
 from agent.config import Settings, get_settings
 from agent.github_client import GitHubClient, PullRequestData
+from agent.offline import heuristic_classify_pr
 from agent.schemas import PRCategory, PRClassification, PRPriority, PRTriageResult
 
 _HOTFIX_KEYWORDS = ("hotfix", "security", "critical", "urgent", "cve")
@@ -105,8 +106,14 @@ def pr_triage(
     limit: int | None = None,
     client: GitHubClient | None = None,
     settings: Settings | None = None,
+    llm=None,
 ) -> PRTriageResult:
-    """Fetch open PRs for `repo` and classify each by category and priority."""
+    """Fetch open PRs for `repo` and classify each by category and priority.
+
+    `llm` defaults to the real chat model when `OPENAI_API_KEY` is set; with
+    no key configured, falls back to `heuristic_classify_pr` (keyword +
+    diff-size rules only, no LLM call) -- see `agent.offline`.
+    """
     settings = settings or get_settings()
     client = client or GitHubClient(settings)
 
@@ -114,15 +121,24 @@ def pr_triage(
     codeowners_text = client.fetch_codeowners(repo)
 
     cache = _load_cache(settings.pr_cache_path)
-    llm = ChatOpenAI(model=settings.agent_model, api_key=settings.openai_api_key, temperature=0)
+    llm = llm or get_chat_model(settings)
 
     triaged: list[PRClassification] = []
     for pr in prs:
         key = _cache_key(pr)
         if key in cache:
             classification = _LLMClassification(**cache[key])
-        else:
+        elif llm is not None:
             classification = _classify_pr(llm, pr)
+            cache[key] = classification.model_dump()
+        else:
+            category, priority = heuristic_classify_pr(pr.title, pr.body, pr.additions, pr.deletions)
+            classification = _LLMClassification(
+                category=category,
+                priority=priority,
+                summary=pr.title,
+                rationale=f"Offline heuristic classification (no OPENAI_API_KEY configured): {_heuristic_priority_hint(pr)}",
+            )
             cache[key] = classification.model_dump()
 
         triaged.append(

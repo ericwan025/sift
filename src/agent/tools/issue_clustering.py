@@ -10,12 +10,13 @@ from collections import defaultdict
 
 import numpy as np
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel
 from sklearn.cluster import AgglomerativeClustering
 
+from agent.backends import get_chat_model, get_embeddings_client
 from agent.config import Settings, get_settings
 from agent.github_client import GitHubClient, IssueData
+from agent.offline import heuristic_label_cluster
 from agent.schemas import IssueCluster, IssueClusteringResult
 
 MAX_BODY_CHARS = 500
@@ -55,8 +56,16 @@ def issue_clustering(
     limit: int | None = None,
     client: GitHubClient | None = None,
     settings: Settings | None = None,
+    llm=None,
+    embeddings=None,
 ) -> IssueClusteringResult:
-    """Fetch open issues for `repo` and cluster them by semantic similarity."""
+    """Fetch open issues for `repo` and cluster them by semantic similarity.
+
+    `embeddings`/`llm` default to the real OpenAI-backed clients when
+    `OPENAI_API_KEY` is set; with no key configured, embeddings fall back to
+    a hashing vectorizer and cluster labels fall back to
+    `heuristic_label_cluster` -- see `agent.offline`.
+    """
     settings = settings or get_settings()
     client = client or GitHubClient(settings)
 
@@ -64,8 +73,8 @@ def issue_clustering(
     if not issues:
         return IssueClusteringResult(repo=repo, clusters=[])
 
-    embeddings_client = OpenAIEmbeddings(model=settings.embedding_model, api_key=settings.openai_api_key)
-    vectors = np.array(embeddings_client.embed_documents([_issue_text(i) for i in issues]))
+    embeddings = embeddings or get_embeddings_client(settings)
+    vectors = np.array(embeddings.embed_documents([_issue_text(i) for i in issues]))
 
     assignments = cluster_vectors(vectors, settings.cluster_distance_threshold)
 
@@ -73,10 +82,11 @@ def issue_clustering(
     for issue, cluster_id in zip(issues, assignments):
         groups[int(cluster_id)].append(issue)
 
-    llm = ChatOpenAI(model=settings.agent_model, api_key=settings.openai_api_key, temperature=0)
+    llm = llm or get_chat_model(settings)
     clusters = []
     for members in groups.values():
-        label = _label_cluster(llm, [m.title for m in members])
+        titles = [m.title for m in members]
+        label = _label_cluster(llm, titles) if llm is not None else heuristic_label_cluster(titles)
         representative = min(members, key=lambda m: m.number)
         clusters.append(
             IssueCluster(

@@ -6,14 +6,13 @@ an answer -- this is the anti-hallucination guarantee the tool exists for.
 from __future__ import annotations
 
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
+from agent.backends import get_chat_model
 from agent.config import Settings, get_settings
 from agent.indexing.loader import FaissRetriever, IndexNotBuiltError, RetrievedChunk
+from agent.offline import NOT_FOUND_SENTENCE, extractive_doc_answer
 from agent.schemas import DocLookupResult, SourceRef
-
-NOT_FOUND_SENTENCE = "I don't have enough information in the codebase to answer that."
 
 SYSTEM_PROMPT = f"""You are a documentation lookup assistant for a codebase.
 Answer the user's question using ONLY the provided context chunks below.
@@ -38,8 +37,14 @@ def doc_lookup(
     retriever: FaissRetriever | None = None,
     settings: Settings | None = None,
     top_k: int | None = None,
+    llm=None,
 ) -> DocLookupResult:
-    """Answer a natural-language question about the codebase, grounded in the FAISS index."""
+    """Answer a natural-language question about the codebase, grounded in the FAISS index.
+
+    `llm` defaults to the real chat model when `OPENAI_API_KEY` is set; with no
+    key configured, falls back to an extractive answer (the best-matching
+    chunk, verbatim) rather than synthesizing prose -- see `agent.offline`.
+    """
     settings = settings or get_settings()
     try:
         retriever = retriever or FaissRetriever(settings)
@@ -50,7 +55,16 @@ def doc_lookup(
     if not chunks:
         return DocLookupResult(answer=NOT_FOUND_SENTENCE, sources=[], grounded=False)
 
-    llm = ChatOpenAI(model=settings.agent_model, api_key=settings.openai_api_key, temperature=0)
+    llm = llm or get_chat_model(settings)
+    if llm is None:
+        answer, grounded = extractive_doc_answer(chunks)
+        sources = (
+            [SourceRef(file_path=c.file_path, start_line=c.start_line, end_line=c.end_line) for c in chunks]
+            if grounded
+            else []
+        )
+        return DocLookupResult(answer=answer, sources=sources, grounded=grounded)
+
     structured_llm = llm.with_structured_output(_LLMAnswer)
     result: _LLMAnswer = structured_llm.invoke(
         [

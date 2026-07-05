@@ -13,6 +13,7 @@ import faiss
 import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from agent.backends import get_embeddings_client
 from agent.config import Settings, get_settings
 from agent.indexing.chunker import Chunk, chunk_file
 
@@ -83,9 +84,7 @@ def _embed_batch(embeddings_client, texts: list[str]) -> list[list[float]]:
 
 
 def embed_chunks(chunks: list[Chunk], settings: Settings) -> np.ndarray:
-    from langchain_openai import OpenAIEmbeddings
-
-    client = OpenAIEmbeddings(model=settings.embedding_model, api_key=settings.openai_api_key)
+    client = get_embeddings_client(settings)
     vectors: list[list[float]] = []
     for i in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
         batch = [c.chunk_text for c in chunks[i : i + EMBEDDING_BATCH_SIZE]]

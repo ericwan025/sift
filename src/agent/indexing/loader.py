@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import faiss
 import numpy as np
 
+from agent.backends import get_embeddings_client
 from agent.config import Settings, get_settings
 
 
