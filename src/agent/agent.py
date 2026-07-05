@@ -10,6 +10,8 @@ model, and repeats until the model answers without calling a tool or the
 """
 from __future__ import annotations
 
+import json
+
 from langchain.agents import create_agent
 
 from agent.backends import has_openai_key
@@ -74,10 +76,12 @@ def run_agent(
 ) -> dict:
     """One-shot query through the agent.
 
-    Returns the final answer text plus the ordered list of tool names
-    invoked, which the eval harness uses to score routing correctness. With
-    no `OPENAI_API_KEY` configured, falls back to `_run_offline` since the
-    LangGraph tool-calling loop has no offline stand-in.
+    Returns `answer`, the ordered list of `tool_calls`, and `tool_results`
+    (each tool's structured output as a plain dict, keyed by tool name) --
+    the eval harness scores against `tool_calls`/`tool_results` uniformly in
+    both online and offline mode. With no `OPENAI_API_KEY` configured, falls
+    back to `_run_offline` since the LangGraph tool-calling loop has no
+    offline stand-in.
     """
     settings = settings or get_settings()
     if not has_openai_key(settings):
@@ -90,8 +94,15 @@ def run_agent(
     )
 
     messages = result["messages"]
-    tool_calls = [m.name for m in messages if getattr(m, "type", None) == "tool"]
-    return {"answer": messages[-1].content, "tool_calls": tool_calls, "messages": messages}
+    tool_messages = [m for m in messages if getattr(m, "type", None) == "tool"]
+    tool_calls = [m.name for m in tool_messages]
+    tool_results = {}
+    for m in tool_messages:
+        try:
+            tool_results[m.name] = json.loads(m.content)
+        except (TypeError, ValueError):
+            tool_results[m.name] = {"raw": m.content}
+    return {"answer": messages[-1].content, "tool_calls": tool_calls, "tool_results": tool_results}
 
 
 def _run_offline(question: str, settings: Settings, repo: str | None, prompt_version: str = "tuned") -> dict:
@@ -111,16 +122,22 @@ def _run_offline(question: str, settings: Settings, repo: str | None, prompt_ver
                 "without OPENAI_API_KEY configured. Not grounded in the repository."
             ),
             "tool_calls": [],
+            "tool_results": {},
         }
 
     if tool_name == "doc_lookup":
         result = doc_lookup(question, settings=settings)
-        return {"answer": result.answer, "tool_calls": ["doc_lookup"], "result": result}
+        return {
+            "answer": result.answer,
+            "tool_calls": ["doc_lookup"],
+            "tool_results": {"doc_lookup": result.model_dump(mode="json")},
+        }
 
     if repo is None:
         return {
             "answer": f"This looks like a {tool_name} question, but no repo (owner/repo) was specified.",
             "tool_calls": [tool_name],
+            "tool_results": {},
         }
 
     if tool_name == "pr_triage":
@@ -128,12 +145,12 @@ def _run_offline(question: str, settings: Settings, repo: str | None, prompt_ver
         return {
             "answer": f"Triaged {len(result.triaged)} open PR(s) for {repo}.",
             "tool_calls": ["pr_triage"],
-            "result": result,
+            "tool_results": {"pr_triage": result.model_dump(mode="json")},
         }
 
     result = issue_clustering(repo, settings=settings)
     return {
         "answer": f"Found {len(result.clusters)} issue cluster(s) for {repo}.",
         "tool_calls": ["issue_clustering"],
-        "result": result,
+        "tool_results": {"issue_clustering": result.model_dump(mode="json")},
     }
