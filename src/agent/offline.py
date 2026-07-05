@@ -76,6 +76,20 @@ class OfflineEmbeddings:
         return self._vector(text)
 
 
+_CONVENTIONAL_PREFIXES: dict[str, PRCategory] = {
+    "fix": PRCategory.BUG_FIX,
+    "feat": PRCategory.FEATURE,
+    "feature": PRCategory.FEATURE,
+    "refactor": PRCategory.REFACTOR,
+    "docs": PRCategory.DOCS,
+    "test": PRCategory.TEST,
+    "tests": PRCategory.TEST,
+    "chore": PRCategory.CHORE,
+    "build": PRCategory.DEPENDENCY,
+    "deps": PRCategory.DEPENDENCY,
+}
+_CONVENTIONAL_PREFIX_RE = re.compile(r"^(\w+)(?:\([^)]*\))?\s*:")
+
 _CATEGORY_KEYWORDS: dict[PRCategory, tuple[str, ...]] = {
     PRCategory.BUG_FIX: ("fix", "bug", "patch", "hotfix", "crash", "regression"),
     PRCategory.DEPENDENCY: ("bump", "dependency", "dependencies", "upgrade dep", "renovate", "dependabot"),
@@ -87,24 +101,43 @@ _CATEGORY_KEYWORDS: dict[PRCategory, tuple[str, ...]] = {
 }
 
 _HOTFIX_KEYWORDS = ("hotfix", "security", "critical", "urgent", "cve")
+_LARGE_DIFF_LINES = 500
+_SMALL_DIFF_LINES = 20
+# Non-functional change categories default to low priority regardless of
+# diff size (unless it's large enough to itself be risky) -- a 300-line
+# refactor with no behavior change isn't urgent just because it's long.
+_LOW_URGENCY_CATEGORIES = {
+    PRCategory.DOCS,
+    PRCategory.TEST,
+    PRCategory.CHORE,
+    PRCategory.REFACTOR,
+    PRCategory.DEPENDENCY,
+}
+
+
+def _classify_category(title: str, text: str) -> PRCategory:
+    prefix_match = _CONVENTIONAL_PREFIX_RE.match(title.strip().lower())
+    if prefix_match and prefix_match.group(1) in _CONVENTIONAL_PREFIXES:
+        return _CONVENTIONAL_PREFIXES[prefix_match.group(1)]
+    for cat, keywords in _CATEGORY_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return cat
+    return PRCategory.CHORE
 
 
 def heuristic_classify_pr(title: str, body: str, additions: int, deletions: int) -> tuple[PRCategory, PRPriority]:
     """Rule-based PR classification used when no LLM is configured."""
     text = f"{title} {body}".lower()
-
-    category = PRCategory.CHORE
-    for cat, keywords in _CATEGORY_KEYWORDS.items():
-        if any(keyword in text for keyword in keywords):
-            category = cat
-            break
-
+    category = _classify_category(title, text)
     total_changes = additions + deletions
+
     if any(keyword in text for keyword in _HOTFIX_KEYWORDS):
         priority = PRPriority.HIGH
-    elif total_changes > 500:
+    elif category in _LOW_URGENCY_CATEGORIES:
+        priority = PRPriority.HIGH if total_changes > _LARGE_DIFF_LINES else PRPriority.LOW
+    elif total_changes > _LARGE_DIFF_LINES:
         priority = PRPriority.HIGH
-    elif total_changes < 20:
+    elif total_changes < _SMALL_DIFF_LINES:
         priority = PRPriority.LOW
     else:
         priority = PRPriority.MEDIUM

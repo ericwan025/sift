@@ -16,7 +16,7 @@ from sklearn.cluster import AgglomerativeClustering
 from agent.backends import get_chat_model, get_embeddings_client
 from agent.config import Settings, get_settings
 from agent.github_client import GitHubClient, IssueData
-from agent.offline import heuristic_label_cluster
+from agent.offline import OfflineEmbeddings, heuristic_label_cluster
 from agent.schemas import IssueCluster, IssueClusteringResult
 
 MAX_BODY_CHARS = 500
@@ -76,7 +76,14 @@ def issue_clustering(
     embeddings = embeddings or get_embeddings_client(settings)
     vectors = np.array(embeddings.embed_documents([_issue_text(i) for i in issues]))
 
-    assignments = cluster_vectors(vectors, settings.cluster_distance_threshold)
+    # The offline hashing embedding has a different cosine-distance profile
+    # than a real learned embedding, so it needs its own threshold.
+    threshold = (
+        settings.offline_cluster_distance_threshold
+        if isinstance(embeddings, OfflineEmbeddings)
+        else settings.cluster_distance_threshold
+    )
+    assignments = cluster_vectors(vectors, threshold)
 
     groups: dict[int, list[IssueData]] = defaultdict(list)
     for issue, cluster_id in zip(issues, assignments):

@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     faiss_index_path: Path = Field(default=Path("./.index/repo.faiss"), alias="FAISS_INDEX_PATH")
     retrieval_top_k: int = Field(default=6, alias="RETRIEVAL_TOP_K")
     cluster_distance_threshold: float = Field(default=0.35, alias="CLUSTER_DISTANCE_THRESHOLD")
+    # The offline hashing embedding produces a different cosine-distance
+    # distribution than text-embedding-3-small (sparser, higher-magnitude),
+    # so it needs its own threshold rather than sharing the tuned-for-real-
+    # embeddings default above. See agent.tools.issue_clustering.
+    offline_cluster_distance_threshold: float = Field(default=0.8, alias="OFFLINE_CLUSTER_DISTANCE_THRESHOLD")
 
     pr_cache_path: Path = Field(default=Path("./.cache/pr_cache.json"), alias="PR_CACHE_PATH")
     max_agent_iterations: int = Field(default=6, alias="MAX_AGENT_ITERATIONS")
