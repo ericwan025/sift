@@ -27,6 +27,8 @@ User (CLI: index / ask / chat / triage / cluster / eval)
 
 The FAISS index is built once (`sift index <repo_path>`) and loaded at runtime by `agent/indexing/loader.py`. Every tool takes its LLM/embeddings/GitHub client as an optional constructor argument -- this is what makes `tests/` mockable and `eval/` runnable directly against tool functions.
 
+The agent is built with `langchain.agents.create_agent` (LangGraph-based). LangChain 1.x removed `create_tool_calling_agent`/`AgentExecutor` in favor of this; the loop it runs is equivalent (model proposes a tool call -> graph executes it -> result fed back -> repeat until a final answer or `recursion_limit`).
+
 ### Offline mode
 
 Every LLM/embeddings call is chosen in one place, `agent/backends.py`, based on whether `OPENAI_API_KEY` is set:
